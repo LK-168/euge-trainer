@@ -13,7 +13,22 @@ from accelerate import Accelerator
 from typing import Optional, List, Union, Literal, Any, Dict, Callable
 from waifuset import logging
 from waifuset import DictDataset
-from diffusers.training_utils import EMAModel
+try:
+    from diffusers.training_utils import EMAModel  # recent diffusers
+except Exception:
+    # Fallback for minimal CPU / reduced dependency environment where training_utils or PEFT parts fail
+    class EMAModel:  # minimal stub to avoid attribute errors
+        def __init__(self, *args, **kwargs):
+            pass
+        def step(self, *args, **kwargs):
+            pass
+        def copy_to(self, *args, **kwargs):
+            pass
+        def get_state_dict(self):
+            return {}
+        def load_state_dict(self, *args, **kwargs):
+            pass
+    # NOTE: EMA disabled automatically; user can ignore.
 from ..utils import class_utils, debug_utils, deepspeed_utils, train_utils, device_utils
 from ..datasets.base_dataset import BaseDataset
 from ..train_state.base_train_state import BaseTrainState

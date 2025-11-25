@@ -43,3 +43,39 @@ data/
 ```
 
 ```
+
+## ControlNet Union 多条件训练
+
+Union ControlNet 支持多控制类型。示例启动：
+```bash
+accelerate launch train.py --trainer sdxl_controlnet_union --config configs/example_config_train_sdxl_controlnet_union.py
+```
+
+### 使用 JSON 清单控制训练样本与模式
+示例 JSON：
+```json
+{
+	"images_root": "/data/images",
+	"controls_root": "/data/controls",
+	"control_type_order": ["openpose","depth_midas","canny","lineart","normal","segment"],
+	"entries": [
+		{"file": "0001.jpg", "modes": [["canny"],["depth_midas"],["openpose"]]},
+		{"file": "0002.jpg", "modes": [["canny","depth_midas"],["openpose"]]},
+		{"file": "0003.jpg", "modes": [["openpose"]]}
+	]
+}
+```
+说明：
+- 不在 entries 中的图片不训练。
+- `modes` 中每个子列表是一条展开样本；有多项则代表复合条件同时激活。
+- 同一原图在一个 epoch 中出现次数 = 其 `modes` 子列表数量。
+
+路径约定：`controls_root/<control_type>/<stem>.png` 存放预生成条件图；缺失且 `generate_missing_controls=True` 时在线生成（需安装 `controlnet_aux`）
+
+配置添加：
+```python
+config.union_json_path = 'data/union_manifest.json'
+config.generate_missing_controls = False
+config.num_control_type = 6
+```
+设置后自动切换为 `SDXLUnionJSONDataset`。

@@ -32,6 +32,9 @@ def main(argv):
     elif trainer == 'sdxl_controlnet':
         from modules.trainers.sdxl_controlnet_trainer import SDXLControlNetTrainer
         trainer_class = SDXLControlNetTrainer
+    elif trainer == 'sdxl_controlnet_union':
+        from modules.trainers.sdxl_controlnet_union_trainer import SDXLControlNetUnionTrainer
+        trainer_class = SDXLControlNetUnionTrainer
     elif trainer == 'sdxl_controlnext':
         from modules.trainers.sdxl_controlnext_trainer import SDXLControlNeXtTrainer
         trainer_class = SDXLControlNeXtTrainer
