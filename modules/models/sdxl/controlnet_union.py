@@ -840,6 +840,26 @@ class ControlNetModel_Union(ModelMixin, ConfigMixin, FromOriginalModelMixin):
         # Copyright by Qi Xin(2024/07/06)
         # inject control type info to time embedding to distinguish different control conditions
         control_type = added_cond_kwargs.get('control_type')
+        if control_type is None:
+            raise ValueError("ControlNetModel_Union requires `control_type` in added_cond_kwargs during forward.")
+
+        # 对齐 control_type 的长度到 control_add_embedding 期望的维度
+        addition_time_embed_dim = getattr(self.config, "addition_time_embed_dim", 256) or 256
+        in_features = self.control_add_embedding.linear_1.in_features
+        need_types = in_features // addition_time_embed_dim
+
+        # control_type: (B, num_types_current) -> pad / 截断到 need_types
+        if control_type.dim() != 2:
+            raise ValueError(f"control_type must be 2D (B, N), got shape {tuple(control_type.shape)}")
+
+        bsz, cur_types = control_type.shape
+        if cur_types < need_types:
+            pad = need_types - cur_types
+            pad_tensor = control_type.new_zeros(bsz, pad)
+            control_type = torch.cat([control_type, pad_tensor], dim=1)
+        elif cur_types > need_types:
+            control_type = control_type[:, :need_types]
+
         control_embeds = self.control_type_proj(control_type.flatten())
         control_embeds = control_embeds.reshape((t_emb.shape[0], -1))
         control_embeds = control_embeds.to(emb.dtype)

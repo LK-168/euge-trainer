@@ -7,27 +7,38 @@ def cfg(**kwargs):
 
 def get_config():
     config = ConfigDict()
-    config.pretrained_model_name_or_path = 'stabilityai/stable-diffusion-xl-base-1.0'
-    config.output_dir = 'projects/sdxl_controlnet_union/my_union'
+    config.pretrained_model_name_or_path = '/data2/xujr/model/noobaiXLNAIXL_epsilonPred11Version/noobaiXLNAIXL_epsilonPred11Version.safetensors'
+    config.output_dir = '/data2/xujr/output/union_test2'
     config.vae_model_name_or_path = None
     config.hf_cache_dir = None
 
     # Dataset sources (image + captions). Provide your own path.
     config.dataset_source = [
-        dict(name_or_path='/path/to/images', read_attrs=True),
+        dict(name_or_path='/data2/xujr/anicontrol-20k/processed_data', read_attrs=True),
     ]
 
     # Multi-condition parameters
     # Provide a list of condition types for dynamic sampling, e.g. ['canny','depth_midas','openpose']
-    config.union_condition_types = ['canny', 'depth_midas', 'openpose']
-    config.num_control_type = 6  # must match ControlNetModel_Union instantiation
+    config.union_condition_types = [
+        'openpose',
+        'depth_midas',
+        'canny',
+        'lineart_anime',
+        'lineart_realistic',
+        'manga_line',
+        'scribble_hed',
+        'scribble_pidinet',
+        'dwpose',
+    ]
+    config.num_control_type = 9
     # Optional JSON manifest to drive per-image modes; if set, dataset class switches automatically
     # Example JSON schema documented in sdxl_union_json_dataset.py
-    config.union_json_path = None  # e.g. 'data/union_manifest.json'
+    config.union_json_path = '/data2/xujr/anicontrol-20k/union_manifest.json'
     config.generate_missing_controls = False  # if True, will attempt on-the-fly generation when file missing
 
 
     # Resolution / buckets
+    # config.resolution = 1024
     config.resolution = 1024
     config.allow_crop = False
     config.random_crop = False
@@ -94,7 +105,7 @@ def get_config():
     )
 
     # Training basic params
-    config.num_train_epochs = 10
+    config.num_train_epochs = 1
     config.batch_size = 1
     config.learning_rate = 1e-5
     config.train_nnet = False
@@ -109,12 +120,20 @@ def get_config():
     config.mixed_precision = 'fp16'
     config.full_bf16 = False
     config.full_fp16 = True
+
+    # config.mixed_precision = 'no'
+    # config.full_bf16 = False
+    # config.full_fp16 = False
+
     config.train_text_encoder = False
     config.learning_rate_te = 5e-6
     config.gradient_checkpointing = True
-    config.gradient_accumulation_steps = 8
-    config.optimizer_type = 'AdamW'
-    config.optimizer_kwargs = cfg(betas=(0.9,0.99), weight_decay=0.01)
+    config.gradient_accumulation_steps = 1
+    # config.optimizer_type = 'AdamW'
+    # config.optimizer_kwargs = cfg(betas=(0.9,0.99), weight_decay=0.01)
+    
+    config.optimizer_type = 'SGDNesterov'
+    config.optimizer_kwargs = cfg(momentum=0.9, weight_decay=0.01)
     config.cpu = False
 
     # Advanced noise / guidance options
@@ -122,12 +141,18 @@ def get_config():
     config.xformers = True
     config.diffusers_xformers = False
     config.sdpa = False
+    # config.mem_eff_attn = False
+    # config.xformers = False
+    # config.diffusers_xformers = False
+    # config.sdpa = False    
+
     config.clip_skip = None
     config.noise_offset = 0
     config.multires_noise_iterations = 0
     config.multires_noise_discount = 0
     config.adaptive_noise_scale = None
-    config.max_grad_norm = 1.0
+    # config.max_grad_norm = 1.0
+    config.max_grad_norm = 0.0
     config.prediction_type = 'epsilon'
     config.zero_terminal_snr = False
     config.ip_noise_gamma = 0

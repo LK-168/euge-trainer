@@ -129,6 +129,9 @@ class SD15TrainState(BaseTrainState):
         if self.accelerator.is_main_process:
             try:
                 sample_dir = os.path.join(self.output_dir, self.output_subdir.samples, f"ep{self.epoch}_step{self.global_step}")
+                
+                os.makedirs(sample_dir, exist_ok=True)
+
                 pipeline = self.get_pipeline()
                 # pipeline.set_use_memory_efficient_attention_xformers(self.use_xformers)
                 self.sample_images(pipeline, sample_dir, benchmark, on_epoch_end=on_epoch_end)
@@ -163,16 +166,27 @@ class SD15TrainState(BaseTrainState):
         return 42
 
     def get_benchmark(self):
+        # Require condition images for ControlNeXt-style pipelines or union datasets
         require_image_condition = 'imagecondition' in self.train_dataset.__class__.__name__.lower()
+        try:
+            if 'controlnext' in self.pipeline_class.__name__.lower():
+                require_image_condition = True
+        except Exception:
+            pass
+        if 'unionjson' in self.train_dataset.__class__.__name__.lower():
+            require_image_condition = True
         if self.eval_benchmark is not None:
             return self.eval_benchmark
         else:
             ind_lst = []
+            # Robust sampling: dataset may be a dict keyed by strings
+            keys = list(self.train_dataset.dataset.keys())
             for i in range(self.eval_train_size):
                 random.seed(self.get_sample_seed() + i)
-                ind_lst.append(random.randint(0, len(self.train_dataset) - 1))
+                idx = random.randint(0, len(keys) - 1)
+                ind_lst.append(idx)
                 random.seed()
-            img_mds = [self.train_dataset.dataset[i] for i in ind_lst]
+            img_mds = [self.train_dataset.dataset[keys[i]] for i in ind_lst]
             samples = []
             for img_md in img_mds:
                 _, _, bucket_size = self.train_dataset.get_size(img_md)
@@ -181,11 +195,27 @@ class SD15TrainState(BaseTrainState):
                     negative_prompt=self.train_dataset.get_negative_caption(img_md),
                     width=bucket_size[0],
                     height=bucket_size[1],
-                    sample_name=f"train_{img_md['image_key']}",
+                    sample_name=f"train_{img_md.get('image_key', img_md.get('file','sample'))}",
                     target_image=Image.fromarray(self.train_dataset.get_bucket_image(img_md)),  # PIL
                 )
                 if require_image_condition:
-                    sample['condition_image'] = self.train_dataset.get_condition_image(img_md, type='pil')
+                    # Prefer union list if available; else fallback
+                    if hasattr(self.train_dataset, 'load_or_generate_control'):
+                        # pick a default type: canny if present, otherwise first
+                        try:
+                            ctype_order = getattr(self.train_dataset, 'control_type_order', [])
+                            use_ctype = 'canny' if 'canny' in ctype_order else (ctype_order[0] if ctype_order else None)
+                            if use_ctype:
+                                # SDXLUnionJSONDataset doesn't expose a direct getter for PIL, use its loader
+                                pil = self.train_dataset.load_or_generate_control(img_md, use_ctype, (bucket_size[0], bucket_size[1]))
+                                if isinstance(pil, torch.Tensor):
+                                    from torchvision.transforms.functional import to_pil_image
+                                    pil = to_pil_image(pil)
+                                sample['condition_image'] = pil
+                        except Exception:
+                            sample['condition_image'] = self.train_dataset.get_condition_image(img_md, type='pil') if hasattr(self.train_dataset, 'get_condition_image') else None
+                    else:
+                        sample['condition_image'] = self.train_dataset.get_condition_image(img_md, type='pil')
                 samples.append(sample)
 
             if self.valid_dataset is not None:
@@ -194,6 +224,8 @@ class SD15TrainState(BaseTrainState):
                     random.seed(self.get_sample_seed() + i)
                     ind_lst.append(random.randint(0, len(self.valid_dataset) - 1))
                     random.seed()
+                keys = list(self.valid_dataset.dataset.keys())
+                img_mds = [self.valid_dataset.dataset[keys[i]] for i in ind_lst]
                 for img_md in img_mds:
                     _, _, bucket_size = self.valid_dataset.get_size(img_md)
                     sample = dict(
@@ -201,11 +233,24 @@ class SD15TrainState(BaseTrainState):
                         negative_prompt=self.valid_dataset.get_negative_caption(img_md),
                         width=bucket_size[0],
                         height=bucket_size[1],
-                        sample_name=f"valid_{img_md['image_key']}",
+                        sample_name=f"valid_{img_md.get('image_key', img_md.get('file','sample'))}",
                         target_image=Image.fromarray(self.valid_dataset.get_bucket_image(img_md)),  # PIL
                     )
                     if require_image_condition:
-                        sample['condition_image'] = self.valid_dataset.get_condition_image(img_md, type='pil')
+                        if hasattr(self.valid_dataset, 'load_or_generate_control'):
+                            try:
+                                ctype_order = getattr(self.valid_dataset, 'control_type_order', [])
+                                use_ctype = 'canny' if 'canny' in ctype_order else (ctype_order[0] if ctype_order else None)
+                                if use_ctype:
+                                    pil = self.valid_dataset.load_or_generate_control(img_md, use_ctype, (bucket_size[0], bucket_size[1]))
+                                    if isinstance(pil, torch.Tensor):
+                                        from torchvision.transforms.functional import to_pil_image
+                                        pil = to_pil_image(pil)
+                                    sample['condition_image'] = pil
+                            except Exception:
+                                sample['condition_image'] = self.valid_dataset.get_condition_image(img_md, type='pil') if hasattr(self.valid_dataset, 'get_condition_image') else None
+                        else:
+                            sample['condition_image'] = self.valid_dataset.get_condition_image(img_md, type='pil')
                     samples.append(sample)
             return samples
 

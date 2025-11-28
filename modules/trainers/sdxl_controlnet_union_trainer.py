@@ -19,9 +19,11 @@ class SDXLControlNetUnionTrainer(SDXLTrainer, SD15ControlNetTrainer):
     For backward compatibility, if 'condition_images' exists and no list is given, we treat it as single control of index 0.
     """
 
-    dataset_class = SDXLImageConditionDataset  # default; can switch to JSON driven
+    # Use the JSON-driven union dataset by default to avoid single-condition samplers
+    dataset_class = SDXLUnionJSONDataset
     nnet_class = UNet2DConditionModel
-    pipeline_class = None  # not used in training loop sampling for now
+    from ..pipelines.sdxl_controlnext_pipeline import StableDiffusionXLControlNeXtPipeline
+    pipeline_class = StableDiffusionXLControlNeXtPipeline
     train_state_class = SDXLControlNetTrainState
     controlnet_class = ControlNetModel_Union
 
@@ -84,10 +86,10 @@ class SDXLControlNetUnionTrainer(SDXLTrainer, SD15ControlNetTrainer):
         if not hasattr(self, 'controlnet') or self.controlnet is None or not isinstance(self.controlnet, ControlNetModel_Union):
             self.controlnet = self.build_controlnet()
         self.logger.info(f"Loaded ControlNet Union with {self.config.num_control_type if hasattr(self.config,'num_control_type') else 6} control types")
-        # Switch dataset class if JSON manifest provided
-        if getattr(self.config, 'union_json_path', None):
-            self.logger.info("Using SDXLUnionJSONDataset via union_json_path")
-            self.dataset_class = SDXLUnionJSONDataset
+        # Ensure union dataset is used; warn if JSON path missing
+        if not getattr(self.config, 'union_json_path', None):
+            self.logger.warning("union_json_path not set; SDXLUnionJSONDataset requires a manifest JSON.")
+
 
     def train_step(self, batch):
         # Prepare latents
@@ -123,17 +125,11 @@ class SDXLControlNetUnionTrainer(SDXLTrainer, SD15ControlNetTrainer):
         else:
             union_control_type = union_control_type.to(self.device)
 
-        # 自动对齐长度到 in_features // addition_time_embed_dim
-        at_dim = getattr(self.controlnet.config, 'addition_time_embed_dim', 256) or 256
-        in_features = self.controlnet.control_add_embedding.linear_1.in_features
-        need_types = in_features // at_dim
-        have_types = union_control_type.shape[1]
-        if have_types != need_types:
-            if have_types < need_types:
-                pad = need_types - have_types
-                union_control_type = torch.cat([union_control_type, torch.zeros(union_control_type.shape[0], pad, device=union_control_type.device, dtype=union_control_type.dtype)], dim=1)
-            else:
-                union_control_type = union_control_type[:, :need_types]
+        # 不再在 trainer 侧尝试根据 controlnet 内部权重推导控制类型个数，
+        # 只保证 union_control_type 是 (B, K) 的二维张量，具体与内部 embedding 维度的对齐
+        # 交由 ControlNetModel_Union.forward 中的逻辑处理（那里已经有 pad/截断）。
+        if union_control_type.dim() == 1:
+            union_control_type = union_control_type.unsqueeze(0)
         # repeat to batch size
         if union_control_type.shape[0] != batch['images'].shape[0]:
             union_control_type = union_control_type.repeat(batch['images'].shape[0], 1)
@@ -144,6 +140,12 @@ class SDXLControlNetUnionTrainer(SDXLTrainer, SD15ControlNetTrainer):
             img = batch['condition_images'].to(self.device, dtype=self.controlnet.dtype)
             num_control_types = union_control_type.shape[1]  # [B, num_control_type]
             condition_images_list = [img] + [torch.zeros_like(img) for _ in range(num_control_types - 1)]
+        elif condition_images_list is None:
+            # create an all-zero list aligned with union vector
+            num_control_types = union_control_type.shape[1]
+            # build zero with images shape
+            img = batch['images'].to(self.device, dtype=self.controlnet.dtype)
+            condition_images_list = [torch.zeros_like(img) for _ in range(num_control_types)]
 
         # ensure tensor list all on device / dtype
         proc_list = []

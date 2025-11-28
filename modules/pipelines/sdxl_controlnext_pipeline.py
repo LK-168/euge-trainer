@@ -58,7 +58,7 @@ from diffusers.utils import (
 from diffusers.utils.torch_utils import is_compiled_module, is_torch_version, randn_tensor
 from diffusers.pipelines.pipeline_utils import DiffusionPipeline, StableDiffusionMixin
 from diffusers.pipelines.stable_diffusion_xl.pipeline_output import StableDiffusionXLPipelineOutput
-from ..models.sd15.controlnext import ControlNetModel
+from ..models.sdxl.controlnext import ControlNetModel
 
 if is_invisible_watermark_available():
     from diffusers.pipelines.stable_diffusion_xl.watermark import StableDiffusionXLWatermarker
@@ -1464,9 +1464,39 @@ class StableDiffusionXLControlNeXtPipeline(
 
                 added_cond_kwargs = {"text_embeds": add_text_embeds, "time_ids": add_time_ids}
 
-                controlnet_output = self.controlnet(
-                    controlnet_image,
+                # ---------- Union control_type 构造（对齐 ControlNetPlus 行为） ----------
+                # 如果外部没有在 added_cond_kwargs 中提供 control_type，则构造一个默认的
+                if "control_type" not in added_cond_kwargs:
+                    controlnet = self.controlnet
+
+                    # 参考正版 ControlNetPlus：使用一个一维 union_control_type，在 batch 维上 repeat
+                    # 这里我们用 task_embedding 的长度作为控制类型个数的来源，避免依赖 config.addition_time_embed_dim
+                    num_control_type = getattr(getattr(controlnet, "task_embedding", None), "shape", [0])[0]
+                    if num_control_type == 0:
+                        # 回退：如果 task_embedding 不存在，则假定至少有 1 个控制类型
+                        num_control_type = 1
+
+                    # 构造 base union_control_type: (K,)，默认激活第 0 个控制类型
+                    union_control_type = torch.zeros(
+                        num_control_type,
+                        device=latents.device,
+                        dtype=prompt_embeds.dtype,
+                    )
+                    union_control_type[0] = 1.0
+
+                    # 根据当前 latent_model_input 的 batch 大小在 batch 维上 repeat
+                    batch_for_type = latent_model_input.shape[0]
+                    control_type = union_control_type.reshape(1, -1).repeat(batch_for_type, 1)
+                    added_cond_kwargs["control_type"] = control_type
+                # ----------------------------------------------------------------------
+                # Union: prepare list and pass encoder states
+                controlnet_cond_list = [controlnet_image]
+                down_block_res_samples, mid_block_res_sample = self.controlnet(
+                    latent_model_input,
                     t,
+                    encoder_hidden_states=prompt_embeds,
+                    added_cond_kwargs=added_cond_kwargs,
+                    controlnet_cond_list=controlnet_cond_list,
                     return_dict=False,
                 )
 
@@ -1480,8 +1510,8 @@ class StableDiffusionXLControlNeXtPipeline(
                     encoder_hidden_states=prompt_embeds,
                     timestep_cond=timestep_cond,
                     cross_attention_kwargs=self.cross_attention_kwargs,
-                    down_block_additional_residuals=None,
-                    mid_block_additional_residual=controlnet_output,
+                    down_block_additional_residuals=[s.to(dtype=self.unet.dtype) for s in down_block_res_samples],
+                    mid_block_additional_residual=mid_block_res_sample.to(dtype=self.unet.dtype),
                     added_cond_kwargs=added_cond_kwargs,
                     return_dict=False,
                 )[0]

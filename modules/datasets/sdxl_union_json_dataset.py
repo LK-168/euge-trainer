@@ -61,6 +61,7 @@ class SDXLUnionJSONDataset(SDXLDataset):
         for item in entries:
             file = item['file']
             modes = item.get('modes', [])
+            caption_text = item.get('caption') or ''
             if not modes:
                 continue
             img_fp = os.path.join(self.images_root, file)
@@ -78,6 +79,7 @@ class SDXLUnionJSONDataset(SDXLDataset):
                     'image_path': img_fp,
                     'file': file,
                     'activated_modes': mode_list,
+                    'caption': caption_text,
                 }
                 sample_index += 1
         self.dataset = expanded  
@@ -138,29 +140,24 @@ class SDXLUnionJSONDataset(SDXLDataset):
         # Fallback: zeros (will still set union_vec bit so model learns position bias?)
         return torch.zeros(3, target_size[1], target_size[0])
 
-    def collate_fn(self, batch: List[str]) -> Dict[str, Any]:
-        # Build samples with parent samplers
-        samples: Dict[str, Any] = {}
-        for sampler in self.get_samplers():
-            samples.update(sampler(batch, samples))
-        # Expect batch size=1 typical; but handle >1 generically
+    def get_union_condition_sample(self, batch: List[str], samples: Dict[str, Any]) -> Dict[str, Any]:
+        """Sampler that adds union control tensors to samples."""
         condition_images_lists = []
         union_vectors = []
         for b_idx in range(len(batch)):
             img_key = batch[b_idx]
             img_md = self.dataset[img_key]
             activated_modes = img_md['activated_modes']
-            # image tensor shape (B,3,H,W); we take single
-            image_tensor = samples['images'][b_idx].unsqueeze(0) if samples['images'] is not None else samples['latents'][b_idx].unsqueeze(0)
+            # image tensor shape (B,3,H,W); use current bucket image to determine size
+            # samples['images'] is (B,3,H,W); select current index
+            image_tensor = samples['images'][b_idx].unsqueeze(0) if samples.get('images') is not None else samples['latents'][b_idx].unsqueeze(0)
             cond_stack, union_vec = self.get_condition_images_list_and_union_vector(img_md, activated_modes, image_tensor)
             condition_images_lists.append(cond_stack)  # (num_types,3,H,W)
             union_vectors.append(union_vec)
-        # Stack along batch dim: we keep trainer expectations: condition_images_list -> list per control type? We instead provide tensor per sample.
-        # Trainer will adapt: provide condition_images_list as list[tensor] length=num_types
-        # Transform shape (B,num_types,3,H,W) -> list[num_types] each (B,3,H,W)
         cond_tensor = torch.stack(condition_images_lists, dim=0)  # B,num_types,3,H,W
-        cond_per_type = [cond_tensor[:, i] for i in range(cond_tensor.shape[1])]  # list length num_types
+        cond_per_type = [cond_tensor[:, i] for i in range(cond_tensor.shape[1])]  # list length num_types; each (B,3,H,W)
         union_control_type = torch.stack(union_vectors, dim=0)  # B,num_types
-        samples['condition_images_list'] = cond_per_type
-        samples['union_control_type'] = union_control_type
-        return samples
+        return {
+            'condition_images_list': cond_per_type,
+            'union_control_type': union_control_type,
+        }
