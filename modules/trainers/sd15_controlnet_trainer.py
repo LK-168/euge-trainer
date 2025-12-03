@@ -74,10 +74,21 @@ class SD15ControlNetTrainer(SD15Trainer):
             lr_controlnet = 0
             self.controlnet.eval()
         self.controlnet.requires_grad_(train_controlnet)
-        self.controlnet = self._prepare_one_model(self.controlnet, train=train_controlnet, dtype=torch.float32, transform_model_if_ddp=True)
+        
+        if self.full_fp16:
+            target_dtype = torch.float16
+            self.logger.info(f"ControlNet will be trained with full fp16.")
+        elif self.full_bf16:
+            target_dtype = torch.bfloat16
+            self.logger.info(f"ControlNet will be trained with full bf16.")
+        else:
+            target_dtype = self.weight_dtype
+            self.logger.info(f"ControlNet will follow global weight_dtype: {target_dtype}")
+
+        self.controlnet = self._prepare_one_model(self.controlnet, train=train_controlnet, dtype=target_dtype, transform_model_if_ddp=True)
         self.train_controlnet = train_controlnet
 
-        assert self.accelerator.unwrap_model(self.controlnet).dtype == torch.float32, f"Expected controlnet dtype to be torch.float32, but got {self.accelerator.unwrap_model(self.controlnet).dtype}"
+        assert self.accelerator.unwrap_model(self.controlnet).dtype == target_dtype, f"Expected controlnet dtype to be {expected_dtype}, but got {self.accelerator.unwrap_model(self.controlnet).dtype}"
 
         return training_models, params_to_optimize
 

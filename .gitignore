@@ -176,3 +176,4 @@ wandb/
 /tokenizers/*
 /projects/*
 /detectron2
+/data/

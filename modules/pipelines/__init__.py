@@ -1,0 +1,2 @@
+from .sdxl_controlnext_pipeline import StableDiffusionXLControlNeXtPipeline
+from .sdxl_controlnet_union_pipeline import StableDiffusionXLControlNetUnionPipeline

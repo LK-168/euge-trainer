@@ -361,22 +361,32 @@ def sample_during_train(
                 # ts_str = time.strftime("%Y%m%d%H%M%S", time.localtime())
                 num_suffix = f"e{epoch:06d}" if epoch is not None else f"{steps:06d}"
                 img_filename = f"{sample_name}-{num_suffix}-{i}-{j}.png"
-                image.save(os.path.join(sample_dir, img_filename))
+                img_path = os.path.join(sample_dir, img_filename)
+                os.makedirs(os.path.dirname(img_path), exist_ok=True)
+                image.save(img_path)
                 if wandb_run is not None:
                     wandb_run.log({img_filename: wandb.Image(image)}, step=steps)
                 if has_image_condition:
-                    condition_image.save(os.path.join(sample_dir, f"{sample_name}_condition-{num_suffix}-{i}-{j}.png"))
+                    cond_filename = f"{sample_name}_condition-{num_suffix}-{i}-{j}.png"
+                    cond_path = os.path.join(sample_dir, cond_filename)
+                    os.makedirs(os.path.dirname(cond_path), exist_ok=True)
+                    condition_image.save(cond_path)
                     if wandb_run is not None:
                         wandb_run.log({f"condition_image-{num_suffix}-{i}-{j}.png": wandb.Image(condition_image)}, step=steps)
 
                     image_overlaid = overlaid_image(image, condition_image)
                     overlaid_filename = f"{sample_name}_overlaid-{num_suffix}-{i}-{j}.png"
-                    image_overlaid.save(os.path.join(sample_dir, overlaid_filename))
+                    overlaid_path = os.path.join(sample_dir, overlaid_filename)
+                    os.makedirs(os.path.dirname(overlaid_path), exist_ok=True)
+                    image_overlaid.save(overlaid_path)
                     if wandb_run is not None:
                         wandb_run.log({overlaid_filename: wandb.Image(image_overlaid)}, step=steps)
                     images_overlaid.append(image_overlaid)
                 if has_target_image:
-                    target_image.save(os.path.join(sample_dir, f"{sample_name}_target-{num_suffix}-{i}-{j}.png"))
+                    target_filename = f"{sample_name}_target-{num_suffix}-{i}-{j}.png"
+                    target_path = os.path.join(sample_dir, target_filename)
+                    os.makedirs(os.path.dirname(target_path), exist_ok=True)
+                    target_image.save(target_path)
                     if wandb_run is not None:
                         wandb_run.log({f"target_image-{num_suffix}-{i}-{j}.png": wandb.Image(target_image)}, step=steps)
 
@@ -386,13 +396,17 @@ def sample_during_train(
                 else:
                     images_grid = concat_images(images)
                 grid_filename = f"{sample_name}_grid-{num_suffix}-{i}.png"
-                images_grid.save(os.path.join(sample_dir, grid_filename))
+                grid_path = os.path.join(sample_dir, grid_filename)
+                os.makedirs(os.path.dirname(grid_path), exist_ok=True)
+                images_grid.save(grid_path)
                 if wandb_run is not None:
                     wandb_run.log({grid_filename: wandb.Image(images_grid)}, step=steps)
                 if has_image_condition:
                     images_overlaid_grid = concat_images([condition_image] + images_overlaid)
                     overlaid_grid_filename = f"{sample_name}_overlaid_grid-{num_suffix}-{i}.png"
-                    images_overlaid_grid.save(os.path.join(sample_dir, overlaid_grid_filename))
+                    overlaid_grid_path = os.path.join(sample_dir, overlaid_grid_filename)
+                    os.makedirs(os.path.dirname(overlaid_grid_path), exist_ok=True)
+                    images_overlaid_grid.save(overlaid_grid_path)
                     if wandb_run is not None:
                         wandb_run.log({overlaid_grid_filename: wandb.Image(images_overlaid_grid)}, step=steps)
 

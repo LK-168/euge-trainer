@@ -135,6 +135,17 @@ class ImageConditionDataset(T2IDataset):
             if is_flipped:
                 condition_image = torch.flip(condition_image, dims=[2])
             sample["condition_images"].append(condition_image)
+        # Replace missing controls with zero tensors of the correct shape
+        if any(ci is None for ci in sample["condition_images"]):
+            ref = next((x for x in sample["condition_images"] if isinstance(x, torch.Tensor)), None)
+            if ref is None:
+                # fallback to image tensor shape if available
+                # assume images tensor exists in samples
+                if "images" in samples and isinstance(samples["images"], torch.Tensor):
+                    ref = samples["images"][0]
+                else:
+                    raise TypeError("No valid reference tensor to build zero control image")
+            sample["condition_images"] = [ci if isinstance(ci, torch.Tensor) else torch.zeros_like(ref) for ci in sample["condition_images"]]
         sample["condition_images"] = torch.stack(sample["condition_images"], dim=0).to(memory_format=torch.contiguous_format).float()
         return sample
 
