@@ -85,6 +85,59 @@ class SDXLUnionJSONDataset(SDXLDataset):
         if self.generate_missing_controls and Processor is None:
             self.logger.warning("`generate_missing_controls` is True but `controlnet_aux` is not installed.")
 
+    # def _setup_dataset(self):
+    #     self.logger.info(f"Loading Union JSON from {self.union_json_path}...")
+    #     with open(self.union_json_path, 'r', encoding='utf-8') as f:
+    #         manifest = json.load(f)
+        
+    #     self.images_root = manifest.get('images_root') or ''
+    #     self.controls_root = manifest.get('controls_root') or self.controls_root_fallback or ''
+    #     self.control_type_order: List[str] = manifest.get('control_type_order') or []
+    #     entries: List[Dict[str, Any]] = manifest.get('entries') or []
+
+    #     if not self.control_type_order:
+    #         raise ValueError("control_type_order must be specified in JSON.")
+
+    #     self.num_control_types = len(self.control_type_order)
+        
+    #     # Build dataset
+    #     expanded = {}
+    #     sample_index = 0
+        
+    #     for item in entries:
+    #         file = item['file']
+    #         modes = item.get('modes', [])
+    #         caption_text = item.get('caption') or ''
+            
+    #         if not modes:
+    #             continue
+            
+    #         img_fp = os.path.join(self.images_root, file)
+    #         if not os.path.exists(img_fp):
+    #             continue
+            
+    #         file_stem = os.path.splitext(os.path.basename(file))[0]
+
+    #         for mode_list in modes:
+    #             # Validation
+    #             for m in mode_list:
+    #                 if m not in self.control_type_order:
+    #                     raise ValueError(f"Control type `{m}` not in order list.")
+                
+    #             entry_key = f"{file_stem}__{sample_index}"
+    #             expanded[entry_key] = {
+    #                 'image_key': entry_key,
+    #                 'image_path': img_fp,
+    #                 'file_stem': file_stem,
+    #                 'activated_modes': mode_list, # List of active controls for this sample
+    #                 'caption': caption_text,
+    #             }
+    #             sample_index += 1
+        
+    #     self.dataset = expanded
+    #     self.logger.info(f"Loaded {len(self.dataset)} Union samples. Types: {self.control_type_order}")
+
+
     def _setup_dataset(self):
         self.logger.info(f"Loading Union JSON from {self.union_json_path}...")
         with open(self.union_json_path, 'r', encoding='utf-8') as f:
@@ -105,19 +158,34 @@ class SDXLUnionJSONDataset(SDXLDataset):
         sample_index = 0
         
         for item in entries:
-            file = item['file']
+            file_path = item['file'] # 例如: "00000-0-100086946_p0/image.png"
             modes = item.get('modes', [])
             caption_text = item.get('caption') or ''
             
             if not modes:
                 continue
             
-            img_fp = os.path.join(self.images_root, file)
+            # --- 核心修复逻辑开始 ---
+            # 1. 获取文件名和父目录名
+            dir_name = os.path.dirname(file_path) # "00000-0-100086946_p0"
+            base_name = os.path.basename(file_path) # "image.png"
+            file_stem_name = os.path.splitext(base_name)[0] # "image"
+
+            # 2. 智能判断 ID
+            if file_stem_name == 'image' and dir_name:
+                file_stem = dir_name
+            else:
+                # 否则可能是扁平结构 (ID.png)，保持原有逻辑
+                file_stem = file_stem_name
+            # --- 核心修复逻辑结束 ---
+            
+            img_fp = os.path.join(self.images_root, file_path)
+            
+            # 简单检查原图是否存在，不存在则跳过，避免无效数据
             if not os.path.exists(img_fp):
+                # self.logger.warning(f"Image not found: {img_fp}") 
                 continue
             
-            file_stem = os.path.splitext(os.path.basename(file))[0]
-
             for mode_list in modes:
                 # Validation
                 for m in mode_list:
@@ -128,14 +196,17 @@ class SDXLUnionJSONDataset(SDXLDataset):
                 expanded[entry_key] = {
                     'image_key': entry_key,
                     'image_path': img_fp,
-                    'file_stem': file_stem,
-                    'activated_modes': mode_list, # List of active controls for this sample
+                    'file_stem': file_stem, # 现在这是正确的 ID 了 (例如 00000..._p0)
+                    'activated_modes': mode_list, 
                     'caption': caption_text,
+                    # 缓存一些不需要重复计算的路径元数据，方便 _load_pure_pil_control 使用
+                    # 'raw_file_path': file_path 
                 }
                 sample_index += 1
         
         self.dataset = expanded
         self.logger.info(f"Loaded {len(self.dataset)} Union samples. Types: {self.control_type_order}")
+
 
     # def get_samplers(self):
     #     return [
@@ -183,6 +254,12 @@ class SDXLUnionJSONDataset(SDXLDataset):
                 except Exception as e:
                     self.logger.warning(f"Failed to open {p}: {e}")
 
+        if not self.generate_missing_controls:
+            self.logger.warning(
+                f"[Dataset Debug] Control '{control_type}' missing for '{file_stem}'. "
+                f"Searched paths: {candidates}"
+            )
+
         # 2. Try Generate
         if self.generate_missing_controls:
             # We need the original image to generate
@@ -192,7 +269,7 @@ class SDXLUnionJSONDataset(SDXLDataset):
                     return get_controlnet_aux_condition(original_pil, control_type)
                 except Exception as e:
                     self.logger.warning(f"Failed to generate {control_type} for {img_md['image_key']}: {e}")
-        
+
         return None
 
 

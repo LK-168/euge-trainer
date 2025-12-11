@@ -291,7 +291,7 @@ class SDXLControlNetUnionTrainer(SD15ControlNetTrainer,SDXLTrainer):
         timesteps = self.get_timesteps(latents)
         noisy_latents = self.get_noisy_latents(latents, noise, timesteps).to(self.weight_dtype)
 
-    # Retrieve multi condition list & control type vector. This logic is now strict.
+        # Retrieve multi condition list & control type vector. This logic is now strict.
         union_control_type = batch.get('union_control_type')
         if union_control_type is None:
             raise ValueError(
@@ -349,6 +349,13 @@ class SDXLControlNetUnionTrainer(SD15ControlNetTrainer,SDXLTrainer):
         if union_control_type.shape[0] != batch['images'].shape[0]:
             union_control_type = union_control_type.repeat(batch['images'].shape[0], 1)
 
+        # # 保存图片用于debug
+        # print("  LOGGER- [Debug] Saving original images from batch")
+        # save_path = "debug/controlnet_union_original_images.png"
+        # from torchvision.utils import save_image
+        # save_image(batch['images'], save_path, nrow=4, normalize=True, value_range=(-1, 1))
+        # self.logger.info(f"  LOGGER- [Debug] Saved original images grid to {save_path}")
+
         proc_list = []
         for idx, ci in enumerate(condition_images_list):
             if ci is None:
@@ -361,7 +368,14 @@ class SDXLControlNetUnionTrainer(SD15ControlNetTrainer,SDXLTrainer):
                     f"Got {ci.shape[1]} channels. If you have pre-encoded features, change the dataset to return raw images."
                 )
             proc_list.append(ci.to(self.device, dtype=self.controlnet.dtype))
+            # # 保存图片用于debug
+            # print("  LOGGER- [Debug] Saving condition image for control type", idx)
+            # save_path = f"debug/controlnet_union_condition_type_{idx}.png"
+            # save_image(ci, save_path, nrow=4, normalize=True, value_range=(0, 1))
+            # self.logger.info(f"  LOGGER- [Debug] Saved condition image grid to {save_path} (Range: 0-1)")
 
+        # raise RuntimeError("Stop here for debug")
+        
         # ControlNet Union forward
         down_block_res_samples, mid_block_res_sample = self.controlnet(
             noisy_latents.to(device=self.device, dtype=(self.controlnet.conv_in.weight.dtype if hasattr(self.controlnet.conv_in, 'weight') else noisy_latents.dtype)),

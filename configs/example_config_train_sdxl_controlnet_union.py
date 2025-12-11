@@ -7,14 +7,14 @@ def cfg(**kwargs):
 
 def get_config():
     config = ConfigDict()
-    config.pretrained_model_name_or_path = '/root/LK/noobai-XL-1.1'
-    config.output_dir = '/root/LK/output/union_test2'
+    config.pretrained_model_name_or_path = '/root/data-local/z_qwen/noobai-XL-1.1'
+    config.output_dir = '/root/data-local/z_qwen/output/union_test2'
     config.vae_model_name_or_path = None
     config.hf_cache_dir = None
 
     # Dataset sources (image + captions). Provide your own path.
     config.dataset_source = [
-        dict(name_or_path='/root/LK/anicontrol-20k/processed_data', read_attrs=True),
+        dict(name_or_path='/root/data-local/z_qwen/dataset/anicontrol-20k/processed_data', read_attrs=True),
     ]
 
     # Multi-condition parameters
@@ -41,7 +41,7 @@ def get_config():
 
     # Optional JSON manifest to drive per-image modes; if set, dataset class switches automatically
     # Example JSON schema documented in sdxl_union_json_dataset.py
-    config.union_json_path = '/root/LK/anicontrol-20k/union_manifest.json'
+    config.union_json_path = '/root/data-local/z_qwen/anicontrol-20k/union_manifest.json'
     config.generate_missing_controls = False  # if True, will attempt on-the-fly generation when file missing
 
 

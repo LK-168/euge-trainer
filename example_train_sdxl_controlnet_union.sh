@@ -6,20 +6,20 @@ export NCCL_DEBUG=INFO
 export NCCL_SHM_DISABLE=1
 # export NCCL_SOCKET_IFNAME=eth0
 export HF_ENDPOINT=https://hf-mirror.com
-export HF_HOME=/root/LK/hf_cache
+export HF_HOME=/root/data-local/z_qwen/hf_cache
 
-export CUDA_VISIBLE_DEVICES="0,1,2,3,4,5,6,7"              # 指定 GPU
-OUTPUT_DIR=/root/LK/output/union_test09_2tp
-UNION_JSON_PATH=/root/LK/anicontrol-20k/union_manifest_2tp.json 
+export CUDA_VISIBLE_DEVICES="0"              # 指定 GPU
+OUTPUT_DIR=/root/data-local/z_qwen/output/union_test01_2cd
+UNION_JSON_PATH=/root/data-local/z_qwen/dataset/anicontrol-20k/union_manifest_2cd.json
 CONFIG_PATH="./configs/example_config_train_sdxl_controlnet_union.py"
-BASE_MODEL_PATH="/root/LK/noobai-XL-1.1"
+BASE_MODEL_PATH="/root/data-local/z_qwen/noobai-XL-1.1"
 
-BATCH_SIZE=${BATCH_SIZE:-2}
+BATCH_SIZE=${BATCH_SIZE:-8}
 LR=${LR:-2e-5}
 EPOCHS=${EPOCHS:-15}
 SAVE_EVERY_STEPS=${SAVE_EVERY_STEPS:-200}
 EVAL_EVERY_STEPS=${EVAL_EVERY_STEPS:-500}
-NUM_PROCESSES=${NUM_PROCESSES:-2}   # 使用的 GPU 数量
+NUM_PROCESSES=${NUM_PROCESSES:-1}   # 使用的 GPU 数量
 
 extra_parameters=()
 
@@ -37,11 +37,6 @@ echo "Using CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES}"
 echo "Output dir: ${OUTPUT_DIR}"
 echo "Union JSON: ${UNION_JSON_PATH}"
 echo "Batch size: ${BATCH_SIZE}, LR: ${LR}, Epochs: ${EPOCHS}"
-
-
-######################
-# 启动训练（多 GPU）  #
-######################
 
 
 

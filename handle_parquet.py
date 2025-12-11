@@ -9,25 +9,26 @@ import multiprocessing
 # L_K不会整parquet文件，只能先处理成图片再训练了
 
 # 1. 数据集源目录
-SOURCE_DATA_DIR = "/root/LK/anicontrol-20k/data"
+SOURCE_DATA_DIR = "/root/data-local/z_qwen/dataset/anicontrol-20k/data"
 
 # 2. Hugging Face 缓存目录
-CACHE_DIR = "/root/LK/hf_cache"
+CACHE_DIR = "/root/data-local/z_qwen/hf_cache"
 
 # 3. 提取出的图片要保存到的目标目录
-OUTPUT_DIR = "/root/LK/anicontrol-20k/processed_data_1tp_canny"
+OUTPUT_DIR = "/root/data-local/z_qwen/dataset/anicontrol-20k/processed_data_all"
 
 # 4. 希望保留的条件图类型列表
 #    - 设置为 None: 提取所有包含图像的样本，不过滤。
 #    - 设置为列表 (如 ['canny', 'depth_midas']): 只提取包含列表中至少一种条件图的样本
 # KEEP_CONDITIONS = ['canny', 'depth_midas']
-KEEP_CONDITIONS = ['canny']
+KEEP_CONDITIONS = None
 
 # 5. 除了条件图外，还必须保留的图像列名
 ALWAYS_KEEP_COLUMNS = ['image','caption'] 
 
 # 6. 用于处理数据的 Worker 数量
-NUM_WORKERS = max(1, os.cpu_count() // 2)
+# NUM_WORKERS = max(1, os.cpu_count() // 2)
+NUM_WORKERS = 2
 
 NUM_ITEMS_TO_PROCESS = None
 # --- 全局变量（供子进程访问） ---
@@ -42,7 +43,7 @@ def process_and_save_item(i):
         item = dataset_split[i]
         
         # 判断此样本是否应该被处理
-        item_is_valid = False
+        item_is_valid = False                                                                                                                               
         present_images = {col_name for col_name in image_columns if isinstance(item.get(col_name), Image.Image)}
 
         if keep_conditions_set is None:
@@ -63,9 +64,6 @@ def process_and_save_item(i):
         # 遍历当前样本中所有存在的图片，只保存符合条件的
         for col_name in present_images:
             # 判断当前图片列名 (col_name) 是否需要保存:
-            # 条件一: 它在必须保留的列表中 (如 'image')
-            # 条件二: 它在我们指定的条件图列表中 (如 'canny', 'depth_midas')
-            # 如果不过滤 (keep_conditions_set is None)，则全部保存
             if keep_conditions_set is None or col_name in always_keep_set or col_name in keep_conditions_set:
                 image_obj = item[col_name]
                 output_path = os.path.join(sample_dir, f"{col_name}.png")
