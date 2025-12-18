@@ -870,112 +870,119 @@ class ControlNetModel_Union(ModelMixin, ConfigMixin, FromOriginalModelMixin):
         emb = emb + aug_emb if aug_emb is not None else emb
 
 
-        # # 2. pre-process
-        # sample = self.conv_in(sample)
-        # indices = torch.nonzero(control_type[0])
-
-        # # Copyright by Qi Xin(2024/07/06)
-        # # add single/multi conditons to input image.
-        # # Condition Transformer provides an easy and effective way to fuse different features naturally
-        # inputs = []
-        # condition_list = []
-
-        # for idx in range(indices.shape[0] + 1):
-        #     if idx == indices.shape[0]:
-        #         controlnet_cond = sample
-        #         feat_seq = torch.mean(controlnet_cond, dim=(2, 3)) # N * C
-        #     else:
-        #         controlnet_cond = self.controlnet_cond_embedding(controlnet_cond_list[indices[idx][0]])
-        #         feat_seq = torch.mean(controlnet_cond, dim=(2, 3)) # N * C
-        #         feat_seq = feat_seq + self.task_embedding[indices[idx][0]]
-
-        #     inputs.append(feat_seq.unsqueeze(1))
-        #     condition_list.append(controlnet_cond)
-
-        # x = torch.cat(inputs, dim=1)  # NxLxC
-        # x = self.transformer_layes(x)
-
-        # controlnet_cond_fuser = sample * 0.0
-        # for idx in range(indices.shape[0]):
-        #     alpha = self.spatial_ch_projs(x[:, idx])
-        #     alpha = alpha.unsqueeze(-1).unsqueeze(-1)
-        #     controlnet_cond_fuser += condition_list[idx] + alpha
-        
-        # sample = sample + controlnet_cond_fuser
-
         # 2. pre-process
         sample = self.conv_in(sample)
-        
-        # [old] indices = torch.nonzero(control_type[0])
-        # 只看第一个样本，导致后面样本的异构条件被忽略。
-        
-        # [new] 计算整个 Batch 的并集 (Union of Active Types)
-        # 只要 Batch 中有任意一个样本激活了某种类型，我们就要计算该类型的特征
-        # control_type: [B, num_types], sum(dim=0) -> [num_types]
-        # 使用 > 0.5 来处理浮点数误差
-        active_types_mask = (control_type.sum(dim=0) > 0.001) 
-        indices = torch.nonzero(active_types_mask) # shape [Num_Active, 1]
+        indices = torch.nonzero(control_type[0])
 
+        if control_type.dim() != 2:
+            logger.error(f"UnionModel: control_type expects 2 dims (B, N), got {control_type.shape}")
+            raise ValueError("Invalid control_type shape")
+
+        if len(controlnet_cond_list) != self.config.num_control_type:
+            raise ValueError(f"controlnet_cond_list length {len(controlnet_cond_list)} does not match num_control_type {self.config.num_control_type}")
+
+        # Copyright by Qi Xin(2024/07/06)
+        # add single/multi conditons to input image.
+        # Condition Transformer provides an easy and effective way to fuse different features naturally
         inputs = []
         condition_list = []
-        
-        # 我们还需要记录被选中的类型的原始索引，以便后续 Mask 使用
-        active_type_indices = []
 
-        # 循环遍历所有被激活的 Condition 类型 (并集)
-        # +1 是为了最后处理 Input Image 本身 (原作逻辑)
         for idx in range(indices.shape[0] + 1):
             if idx == indices.shape[0]:
                 controlnet_cond = sample
                 feat_seq = torch.mean(controlnet_cond, dim=(2, 3)) # N * C
             else:
-                # 获取类型索引
-                type_idx = indices[idx][0].item()
-                active_type_indices.append(type_idx)
-                
-                # 取出该类型的 Batch Tensor (可能包含部分全黑样本)
-                raw_cond = controlnet_cond_list[type_idx]
-                
-                # 编码
-                controlnet_cond = self.controlnet_cond_embedding(raw_cond)
-                
-                # 计算特征 + Task Embedding
-                feat_seq = torch.mean(controlnet_cond, dim=(2, 3)) 
-                feat_seq = feat_seq + self.task_embedding[type_idx]
-                
-                condition_list.append(controlnet_cond)
+                controlnet_cond = self.controlnet_cond_embedding(controlnet_cond_list[indices[idx][0]])
+                feat_seq = torch.mean(controlnet_cond, dim=(2, 3)) # N * C
+                feat_seq = feat_seq + self.task_embedding[indices[idx][0]]
 
             inputs.append(feat_seq.unsqueeze(1))
+            condition_list.append(controlnet_cond)
 
-        # Condition Transformer (并行处理所有激活的特征)
-        x = torch.cat(inputs, dim=1)  # B x (Num_Active + 1) x C
+        x = torch.cat(inputs, dim=1)  # NxLxC
         x = self.transformer_layes(x)
 
-        # Masked Fusion
         controlnet_cond_fuser = sample * 0.0
-        
-        for idx in range(len(condition_list)):
-            type_idx = active_type_indices[idx]
-            
-            # 1. 计算融合系数 Alpha (来自 Transformer 输出)
-            # x[:, idx] 对应第 idx 个 condition 的输出
+        for idx in range(indices.shape[0]):
             alpha = self.spatial_ch_projs(x[:, idx])
-            alpha = alpha.unsqueeze(-1).unsqueeze(-1) # [B, C, 1, 1]
-            
-            # 2. 获取该类型的特征
-            current_cond_feature = condition_list[idx] + alpha
-            
-            # 3. [关键] 获取该类型的 Batch Mask
-            # control_type: [B, num_types] -> 取出当前类型的列 [B]
-            # 扩展维度以匹配特征 [B, 1, 1, 1]
-            # 这样，对于没有激活该类型的样本，其系数变为 0，即使 Transformer 输出了值，也不会产生影响
-            # 强转 dtype 避免 float16/32 不匹配
-            current_type_mask = control_type[:, type_idx].view(bsz, 1, 1, 1).to(dtype=current_cond_feature.dtype)
-            
-            # 4. 累加 (Apply Mask)
-            controlnet_cond_fuser += current_cond_feature * current_type_mask
+            alpha = alpha.unsqueeze(-1).unsqueeze(-1)
+            controlnet_cond_fuser += condition_list[idx] + alpha
         
         sample = sample + controlnet_cond_fuser
+
+        # 2. pre-process
+        # sample = self.conv_in(sample)
+        
+        # # [old] indices = torch.nonzero(control_type[0])
+        # # 只看第一个样本，导致后面样本的异构条件被忽略。
+        
+        # # [new] 计算整个 Batch 的并集 (Union of Active Types)
+        # # 只要 Batch 中有任意一个样本激活了某种类型，我们就要计算该类型的特征
+        # # control_type: [B, num_types], sum(dim=0) -> [num_types]
+        # # 使用 > 0.5 来处理浮点数误差
+        # active_types_mask = (control_type.sum(dim=0) > 0.001) 
+        # indices = torch.nonzero(active_types_mask) # shape [Num_Active, 1]
+
+        # inputs = []
+        # condition_list = []
+        
+        # # 我们还需要记录被选中的类型的原始索引，以便后续 Mask 使用
+        # active_type_indices = []
+
+        # # 循环遍历所有被激活的 Condition 类型 (并集)
+        # # +1 是为了最后处理 Input Image 本身 (原作逻辑)
+        # for idx in range(indices.shape[0] + 1):
+        #     if idx == indices.shape[0]:
+        #         controlnet_cond = sample
+        #         feat_seq = torch.mean(controlnet_cond, dim=(2, 3)) # N * C
+        #     else:
+        #         # 获取类型索引
+        #         type_idx = indices[idx][0].item()
+        #         active_type_indices.append(type_idx)
+                
+        #         # 取出该类型的 Batch Tensor (可能包含部分全黑样本)
+        #         raw_cond = controlnet_cond_list[type_idx]
+                
+        #         # 编码
+        #         controlnet_cond = self.controlnet_cond_embedding(raw_cond)
+                
+        #         # 计算特征 + Task Embedding
+        #         feat_seq = torch.mean(controlnet_cond, dim=(2, 3)) 
+        #         feat_seq = feat_seq + self.task_embedding[type_idx]
+                
+        #         condition_list.append(controlnet_cond)
+
+        #     inputs.append(feat_seq.unsqueeze(1))
+
+        # # Condition Transformer (并行处理所有激活的特征)
+        # x = torch.cat(inputs, dim=1)  # B x (Num_Active + 1) x C
+        # x = self.transformer_layes(x)
+
+        # # Masked Fusion
+        # controlnet_cond_fuser = sample * 0.0
+        
+        # for idx in range(len(condition_list)):
+        #     type_idx = active_type_indices[idx]
+            
+        #     # 1. 计算融合系数 Alpha (来自 Transformer 输出)
+        #     # x[:, idx] 对应第 idx 个 condition 的输出
+        #     alpha = self.spatial_ch_projs(x[:, idx])
+        #     alpha = alpha.unsqueeze(-1).unsqueeze(-1) # [B, C, 1, 1]
+            
+        #     # 2. 获取该类型的特征
+        #     current_cond_feature = condition_list[idx] + alpha
+            
+        #     # 3. [关键] 获取该类型的 Batch Mask
+        #     # control_type: [B, num_types] -> 取出当前类型的列 [B]
+        #     # 扩展维度以匹配特征 [B, 1, 1, 1]
+        #     # 这样，对于没有激活该类型的样本，其系数变为 0，即使 Transformer 输出了值，也不会产生影响
+        #     # 强转 dtype 避免 float16/32 不匹配
+        #     current_type_mask = control_type[:, type_idx].view(bsz, 1, 1, 1).to(dtype=current_cond_feature.dtype)
+            
+        #     # 4. 累加 (Apply Mask)
+        #     controlnet_cond_fuser += current_cond_feature * current_type_mask
+        
+        # sample = sample + controlnet_cond_fuser
         #-------------------------------------------------------------------------------------------
 
         # 3. down

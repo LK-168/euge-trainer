@@ -85,58 +85,62 @@ class SDXLUnionJSONDataset(SDXLDataset):
         if self.generate_missing_controls and Processor is None:
             self.logger.warning("`generate_missing_controls` is True but `controlnet_aux` is not installed.")
 
-    # def _setup_dataset(self):
-    #     self.logger.info(f"Loading Union JSON from {self.union_json_path}...")
-    #     with open(self.union_json_path, 'r', encoding='utf-8') as f:
-    #         manifest = json.load(f)
-        
-    #     self.images_root = manifest.get('images_root') or ''
-    #     self.controls_root = manifest.get('controls_root') or self.controls_root_fallback or ''
-    #     self.control_type_order: List[str] = manifest.get('control_type_order') or []
-    #     entries: List[Dict[str, Any]] = manifest.get('entries') or []
 
-    #     if not self.control_type_order:
-    #         raise ValueError("control_type_order must be specified in JSON.")
-
-    #     self.num_control_types = len(self.control_type_order)
+    def make_buckets(self, dataset: Dict[str, Any]) -> Dict[tuple, List[str]]:
+        """
+        覆写分桶逻辑：
+        1. 调用父类方法，获取基于分辨率 (w, h) 的分桶。
+        2. 将每个分辨率桶进一步按 'activated_modes' 拆分。
+        这样生成的 Batch 既满足分辨率一致，也满足控制类型组合一致。
+        """
+        # 1. 获取父类的基础分桶 (已处理分辨率和权重)
+        # resolution_buckets 结构: { (w, h): [img_key1, img_key1, img_key2...], ... }
+        resolution_buckets = super().make_buckets(dataset)
         
-    #     # Build dataset
-    #     expanded = {}
-    #     sample_index = 0
+        final_buckets = {}
         
-    #     for item in entries:
-    #         file = item['file']
-    #         modes = item.get('modes', [])
-    #         caption_text = item.get('caption') or ''
+        for resolution, img_keys in resolution_buckets.items():
+            # 临时字典：在当前分辨率下，按控制模式分组
+            mode_groups: Dict[tuple, List[str]] = {}
             
-    #         if not modes:
-    #             continue
-            
-    #         img_fp = os.path.join(self.images_root, file)
-    #         if not os.path.exists(img_fp):
-    #             continue
-            
-    #         file_stem = os.path.splitext(os.path.basename(file))[0]
-
-    #         for mode_list in modes:
-    #             # Validation
-    #             for m in mode_list:
-    #                 if m not in self.control_type_order:
-    #                     raise ValueError(f"Control type `{m}` not in order list.")
+            for key in img_keys:
+                img_md = dataset[key]
+                # 获取该样本的控制模式，转为 tuple 以便作为字典 key
+                # 如果没有 modes 字段，默认为空 tuple
+                modes = tuple(img_md.get('activated_modes', []))
                 
-    #             entry_key = f"{file_stem}__{sample_index}"
-    #             expanded[entry_key] = {
-    #                 'image_key': entry_key,
-    #                 'image_path': img_fp,
-    #                 'file_stem': file_stem,
-    #                 'activated_modes': mode_list, # List of active controls for this sample
-    #                 'caption': caption_text,
-    #             }
-    #             sample_index += 1
-        
-    #     self.dataset = expanded
-    #     self.logger.info(f"Loaded {len(self.dataset)} Union samples. Types: {self.control_type_order}")
+                if modes not in mode_groups:
+                    mode_groups[modes] = []
+                mode_groups[modes].append(key)
+            
+            # 将拆分后的组放回最终 buckets
+            # 新的 Key 结构: (w, h, mode1, mode2, ...)
+            # 这样既保留了 w, h 在前两位（兼容父类排序逻辑），又区分了控制类型
+            for modes, keys in mode_groups.items():
+                new_key = resolution + modes
+                final_buckets[new_key] = keys
 
+        self.logger.info(f"--- Union Bucket Statistics ---")
+        self.logger.info(f"Total Buckets: {len(final_buckets)}")
+        total_remainder_batches = 0
+        bs = getattr(self, 'batch_size', 8) 
+        print(f"Using batch size: {bs}")
+        for b_key, b_imgs in final_buckets.items():
+            count = len(b_imgs)
+            # 假设 batch_size 可以从 self.batch_size 获取，或者硬编码 8 用于观察
+            # 注意：dataset 实例通常有 batch_size 属性，如果没有，这行仅作打印参考
+            
+            remainder = count % bs
+            if remainder != 0:
+                self.logger.info(f"Bucket {b_key} has {count} images. Remainder: {remainder} (Will create a partial batch of size {remainder})")
+                total_remainder_batches += 1
+        
+        if total_remainder_batches == 0:
+            self.logger.info("Perfect! All buckets are divisible by batch size.")
+        else:
+            self.logger.info(f"Found {total_remainder_batches} buckets that will produce a partial batch.")
+        
+        return final_buckets
 
     def _setup_dataset(self):
         self.logger.info(f"Loading Union JSON from {self.union_json_path}...")
@@ -207,34 +211,6 @@ class SDXLUnionJSONDataset(SDXLDataset):
         self.dataset = expanded
         self.logger.info(f"Loaded {len(self.dataset)} Union samples. Types: {self.control_type_order}")
 
-
-    # def get_samplers(self):
-    #     return [
-    #         self.get_basic_sample,
-    #         self.get_size_sample,
-    #         self.get_control_sample,
-    #     ]
-
-    # def get_samplers(self):
-    #     samplers = super().get_samplers()
-
-    #     control_sampler = getattr(self, "get_control_sample", None)
-    #     if control_sampler is None:
-    #         return samplers
-
-    #     if control_sampler in samplers:
-    #         samplers.remove(control_sampler)
-
-    #     insert_idx = len(samplers)
-
-    #     for idx, func in enumerate(samplers):
-    #         name = getattr(func, "__name__", "")
-    #         if name.startswith("get_control_") and func is not control_sampler:
-    #             insert_idx = idx
-    #             break
-
-    #     samplers.insert(insert_idx, control_sampler)
-    #     return samplers
 
     def _load_pure_pil_control(self, img_md: Dict, control_type: str) -> Optional[Image.Image]:
         """Loads a raw PIL control image from disk or generates it, without resizing/cropping."""
@@ -364,6 +340,7 @@ class SDXLUnionJSONDataset(SDXLDataset):
                     if ctrl_img is None:
                         # Fallback: black image
                         ctrl_img = Image.new("RGB", img_md['image_size'], (0,0,0))
+                        raise Exception(f"Control image for type '{control_name}' could not be loaded or generated for sample '{img_key}'.")
                     
                     # 2. Mark vector
                     union_control_type_tensor[i, type_idx] = 1.0

@@ -15,12 +15,12 @@ import json
 import os
 import sys
 from pathlib import Path
-
+import random
 # 1. handle_parquet.py 生成的 processed_data 绝对路径
 PROCESSED_DIR = "/root/data-local/z_qwen/dataset/anicontrol-20k/processed_data"
 
 # 2. 输出 JSON 文件的保存路径
-OUT_JSON = "/root/data-local/z_qwen/dataset/anicontrol-20k/union_manifest_2cd.json"
+OUT_JSON = "/root/data-local/z_qwen/dataset/anicontrol-20k/union_manifest_2cd_multi.json"
 
 # 3. 控件图符号链接根目录
 #    - 如果需要创建符号链接树 (用于分开存放不同类型的 condition)，请填写路径。
@@ -31,17 +31,24 @@ CONTROLS_ROOT = "/root/data-local/z_qwen/dataset/anicontrol-20k/controls_root_2c
 # 4. 控制类型列表 (顺序很重要，对应模型通道的顺序)
 CONTROL_TYPES = [
     # "openpose",
-    # "depth_midas",
-    # "canny",
+    "depth_midas",
+    "canny",
     # "lineart_anime",
     # "lineart_realistic",
     # "manga_line",
     # "scribble_hed",
     # "scribble_pidinet",
     # "dwpose",
-    "depth_midas",
-    "canny",
 ]
+
+ENABLE_MULTI_CONDITION = True  # 是否启用多条件复合生成
+MULTI_CONDITION_PROB = 0.5    # 多条件生成的概率
+MAX_MULTI_CONDITIONS = 3       # 最多同时使用多少种条件
+
+MAX_IMAGE_TRAINING_TYPES = 4   # 每张图最多训练多少种模式 (含单条件和多条件)
+
+SEED = 42
+
 
 def discover_samples(processed_dir: Path):
     """遍历 processed_dir，返回 [(image_key, sample_dir)] 列表。"""
@@ -127,42 +134,68 @@ def read_caption(sample_dir: Path) -> str:
     return ""
 
 
-def build_entries(processed_dir: Path, samples, control_types, controls_present_map):
-    """构建 JSON entries 列表。"""
+def build_entries(processed_dir: Path, samples, control_types, 
+                  controls_present_map, 
+                  multi_condition=True, 
+                  multi_condition_prob=0.5, 
+                  max_multi_conditions=3,
+                  max_image_training_types=4):
+    """
+    构建 JSON entries 列表 (增强版：支持复合条件生成)。
+    """
     entries = []
     
     for image_key, sample_dir in samples:
         main_image = sample_dir / "image.png"
         
         if not main_image.exists():
-            continue # 没有主图则跳过
+            continue 
 
         present = controls_present_map.get(image_key, [])
-        # 再次过滤，确保只包含配置中定义的类型
         present = [c for c in present if c in control_types]
         
-        caption_text = read_caption(sample_dir)
-
-        # 构建 modes:
-        # 当前逻辑：每个存在的 condition 单独作为一个训练样本 (Probability=1.0 for that cond)
-        # 结果示例: modes: [["canny"], ["depth"]]
-        # 如果你想混合训练(一张图同时作为canny和depth样本)，保持下面这样即可。
         if not present:
-            modes = []
-        else:
-            modes = [[c] for c in present]
+            continue
+
+        caption_text = read_caption(sample_dir)
+        modes = []
+
+        # --- 策略 A: 总是包含单条件样本 (基础能力) ---
+        for c in present:
+            modes.append([c])
+        
+        if multi_condition and len(present) >= 2:
+            if random.random() < multi_condition_prob:
+                current_limit = min(max_multi_conditions, len(present))
+                
+                # 确保下限是 2，上限至少是 2
+                if current_limit < 2:
+                    current_limit = 2
+                
+                num_to_pick = random.randint(2, current_limit)
+                
+                combo = random.sample(present, num_to_pick)
+
+                combo.sort()
+                
+                if combo not in modes:
+                    modes.append(combo)
+        
+        # 限制每张图的训练模式数量，防止过多
+        if len(modes) > max_image_training_types:
+            modes = random.sample(modes, max_image_training_types)
 
         entries.append({
-            "file": f"{image_key}/image.png", # 相对路径，相对于 images_root
+            "file": f"{image_key}/image.png", 
             "modes": modes,
             "caption": caption_text,
         })
         
     return entries
 
-
 def main():
     # 路径转换
+    random.seed(SEED)
     processed_dir_path = Path(PROCESSED_DIR).resolve()
     out_json_path = Path(OUT_JSON).resolve()
     
@@ -186,7 +219,10 @@ def main():
         controls_present_map = scan_processed_dir_only(samples, CONTROL_TYPES)
 
     # 3. 构建 Entries
-    entries = build_entries(processed_dir_path, samples, CONTROL_TYPES, controls_present_map)
+    entries = build_entries(processed_dir_path, samples, CONTROL_TYPES, 
+                            controls_present_map, multi_condition=ENABLE_MULTI_CONDITION, 
+                            multi_condition_prob=MULTI_CONDITION_PROB, max_multi_conditions=MAX_MULTI_CONDITIONS,
+                            max_image_training_types=MAX_IMAGE_TRAINING_TYPES)
 
     # 4. 组装 Manifest
     manifest = {

@@ -225,9 +225,44 @@ class BaseTrainState(class_utils.SubModuleMixin):
 
     def resume(self):
         if self.resume_from:
-            self.accelerator.load_state(self.resume_from)
-            self.global_step = self.accelerator.step
+            # Actively load state when using config.resume_from (no CLI --resume_from_checkpoint)
+            try:
+                self.accelerator.load_state(self.resume_from)
+            except Exception as e:
+                self.logger.print(logging.red(f"Failed to load state from {self.resume_from}: {e}"))
+                # continue to try infer step even if load_state fails
+
+            # Sync our global_step from the restored lr_scheduler/optimizer state instead of Accelerator.step
+            resumed_step = None
+            try:
+                # Prefer lr_scheduler state which reliably tracks step progression
+                if hasattr(self.lr_scheduler, "_step_count"):
+                    # _step_count is the next step to take; last completed step is (_step_count - 1)
+                    resumed_step = int(getattr(self.lr_scheduler, "_step_count")) - 1
+                elif hasattr(self.lr_scheduler, "last_epoch"):
+                    # Some schedulers track by epoch; use last_epoch as proxy
+                    resumed_step = int(getattr(self.lr_scheduler, "last_epoch"))
+            except Exception:
+                resumed_step = None
+
+            # Fallback: try optimizer param state "step" of first param group
+            if resumed_step is None and hasattr(self, "optimizer") and self.optimizer is not None:
+                try:
+                    state_dict = self.optimizer.state_dict()
+                    # state is a dict keyed by parameter IDs; take first entry
+                    first_state = next(iter(state_dict.get("state", {}).values()), {})
+                    resumed_step = int(first_state.get("step")) if "step" in first_state else None
+                except Exception:
+                    resumed_step = None
+
+            if resumed_step is None:
+                # As a last resort, keep current global_step (likely 0) but warn
+                self.logger.print(logging.yellow("Warning: could not infer resumed step from scheduler/optimizer; leaving global_step as is."))
+            else:
+                self.global_step = max(0, resumed_step)
+
             self.logger.print(f"train state loaded from: `{logging.yellow(self.resume_from)}`")
+            self.logger.print(f"restored global_step from scheduler/optimizer: {logging.green(self.global_step)}")
 
     def pbar(self):
         from tqdm import tqdm

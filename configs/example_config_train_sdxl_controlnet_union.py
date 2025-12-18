@@ -70,7 +70,7 @@ def get_config():
         (1024, 1024), (1152, 896), (896, 1152), (1216, 832), (832, 1216),
         (1344, 768), (768, 1344), (1536, 640), (640, 1536), (1792, 576), (576, 1792), (2048, 512), (512, 2048)
     ]
-    config.vae_batch_size = 6
+    config.vae_batch_size = 8
     config.max_dataset_n_workers = 1
     config.max_dataloader_n_workers = 16
     config.persistent_data_loader_workers = False
@@ -92,7 +92,7 @@ def get_config():
     config.save_on_keyboard_interrupt = True
     config.save_on_exception = True
     config.save_max_n_models = 5
-    config.save_max_n_train_states = 2
+    config.save_max_n_train_states = 3
 
     # Sampling / evaluation
     config.eval_train_size = 1
@@ -124,7 +124,7 @@ def get_config():
     config.train_controlnet = True
     config.learning_rate_controlnet = 1e-5
     config.lr_scheduler = 'constant_with_warmup'
-    config.lr_warmup_steps = 500
+    config.lr_warmup_steps = 200
     config.lr_scheduler_power = 1.0
     config.lr_scheduler_num_cycles = 1
     config.lr_scheduler_kwargs = cfg()
@@ -138,26 +138,26 @@ def get_config():
 
     config.train_text_encoder = False
     config.learning_rate_te = 5e-6
-    config.gradient_checkpointing = True
-    config.gradient_accumulation_steps = 16
-    config.optimizer_type = 'AdaFactor'
+    config.gradient_checkpointing = False
+    config.gradient_accumulation_steps = 1
+    # config.optimizer_type = 'AdaFactor'
     
-    config.optimizer_kwargs = cfg(
-        relative_step=False,
-        scale_parameter=False,
-        warmup_init=False,
-        # weight_decay=0.03,
-        # betas=(0.9, 0.9),
-        # amsgrad=False
-    )
+    # config.optimizer_kwargs = cfg(
+    #     relative_step=False,
+    #     scale_parameter=False,
+    #     warmup_init=False,
+    #     # weight_decay=0.03,
+    #     # betas=(0.9, 0.9),
+    #     # amsgrad=False
+    # )
     # config.optimizer_type = 'AdamW'
     # config.optimizer_kwargs = cfg(betas=(0.9,0.99), weight_decay=0.01)
     
     # config.optimizer_type = 'SGDNesterov'
     # config.optimizer_kwargs = cfg(momentum=0.9, weight_decay=0.01)
 
-    # config.optimizer_type = 'AdamW8bit'
-    # config.optimizer_kwargs = cfg(betas=(0.9,0.99), weight_decay=0.01)
+    config.optimizer_type = 'AdamW8bit'
+    config.optimizer_kwargs = cfg(betas=(0.9,0.99), weight_decay=0.01,eps=1e-8)
 
     config.cpu = False
     # Advanced noise / guidance options
@@ -171,7 +171,7 @@ def get_config():
     # config.sdpa = False    
 
     config.clip_skip = None
-    config.noise_offset = 0
+    config.noise_offset = 0.03
     config.multires_noise_iterations = 0
     config.multires_noise_discount = 0
     config.adaptive_noise_scale = None
@@ -185,6 +185,8 @@ def get_config():
     config.max_timestep = 1000
     config.timestep_sampler_type = 'uniform'
 
+    config.caption_dropout_prob = 0.2
+ 
     # Cache latents
     config.cache_latents = False
     config.cache_latents_to_disk = True
@@ -193,5 +195,7 @@ def get_config():
     config.keep_cached_latents_in_memory = False
     config.async_cache = True
     config.cache_latents_max_dataloader_n_workers = 32
+
+    config.resume_from = "/root/data-local/z_qwen/output/union_test07_2cd/train_state/union_test07_2cd_train-state_ep6_step11000"
 
     return config

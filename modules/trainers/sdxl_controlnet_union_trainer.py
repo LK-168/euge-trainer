@@ -24,7 +24,7 @@ class _UnionPipelineWrapper(StableDiffusionXLControlNetUnionPipeline):
         controlnet_image=None,
         height=None,
         width=None,
-    union_control_type=None,
+        union_control_type=None,
         **kwargs,
     ):
         if image_list is None:
@@ -44,7 +44,9 @@ class _UnionPipelineWrapper(StableDiffusionXLControlNetUnionPipeline):
             
             import torch as _torch
             union_control_type = _torch.zeros((1, num_control_type), dtype=_torch.float32)
-
+            controlnet_cond_list = []
+            for _ in range(num_control_type):
+                controlnet_cond_list.append(None)
             
 
         # 3. 调用父类
@@ -55,6 +57,7 @@ class _UnionPipelineWrapper(StableDiffusionXLControlNetUnionPipeline):
             height=height,
             width=width,
             union_control_type=union_control_type,
+            controlnet_cond_list=controlnet_cond_list,
             **kwargs,
         )
 
@@ -95,100 +98,6 @@ class SDXLControlNetUnionTrainer(SD15ControlNetTrainer,SDXLTrainer):
             nnet_class=self.nnet_class,
         )
 
-    # def build_controlnet(self):
-    #     # Build a ControlNet that mirrors the UNet's architecture but with corrected parameters.
-    #     self.logger.info("  LOGGER--- Calling build_controlnet ---")
-
-    #     nnet_config = self.nnet.config
-
-    #     # 1. Extract architecture directly from the provided UNet config.
-    #     addition_embed_type = nnet_config.addition_embed_type
-    #     down_block_types = nnet_config.down_block_types
-    #     block_out_channels = nnet_config.block_out_channels
-    #     layers_per_block = nnet_config.layers_per_block
-    #     cross_attention_dim = nnet_config.cross_attention_dim
-    #     transformer_layers_per_block = nnet_config.transformer_layers_per_block
-    #     projection_class_embeddings_input_dim = nnet_config.projection_class_embeddings_input_dim
-
-    #     # This is the key fix: the ControlNet must have this set to False.
-    #     use_linear_projection = False
-
-    #     self.logger.info(f"  LOGGER- UNet addition_embed_type: {addition_embed_type}")
-    #     self.logger.info(f"  LOGGER- Mirroring UNet architecture with {len(down_block_types)} down blocks.")
-    #     self.logger.info(f"  LOGGER- Down block types: {down_block_types}")
-    #     self.logger.info(f"  LOGGER- Block out channels: {block_out_channels}")
-    #     self.logger.info(f"  LOGGER- Setting use_linear_projection: {use_linear_projection}")
-    #     self.logger.info(f"  LOGGER- cross_attention_dim: {cross_attention_dim}")
-    #     self.logger.info(f"  LOGGER- transformer_layers_per_block: {transformer_layers_per_block}")
-    #     self.logger.info(f"  LOGGER- projection_class_embeddings_input_dim: {projection_class_embeddings_input_dim}")
-
-    #     # 2. Dynamically derive layer-specific parameters.
-    #     # The 'attention_head_dim' in diffusers can be an int (dim) or a tuple (num_heads).
-    #     # We need to provide what ControlNet expects.
-    #     if isinstance(nnet_config.attention_head_dim, int):
-    #         attention_head_dim = nnet_config.attention_head_dim
-    #         num_attention_heads = tuple(c // attention_head_dim for c in block_out_channels)
-    #     else:
-    #         # If it's a tuple, it already represents num_attention_heads.
-    #         # We must infer the head_dim. A common default is 64.
-    #         num_attention_heads = nnet_config.attention_head_dim
-    #         attention_head_dim = 64 # Assuming a standard head dimension
-    #         self.logger.warning(f"  LOGGER- UNet config 'attention_head_dim' is a tuple. Using it as 'num_attention_heads': {num_attention_heads}")
-    #         self.logger.warning(f"  LOGGER- Assuming 'attention_head_dim' is {attention_head_dim}.")
-
-    #     self.logger.info(f"  LOGGER- Calculated num_attention_heads: {num_attention_heads}")
-    #     self.logger.info(f"  LOGGER- Using attention_head_dim: {attention_head_dim}")
-
-    #     # 3. Get other general parameters.
-    #     num_control_type = getattr(self.config, 'num_control_type', 6)
-    #     addition_time_embed_dim = getattr(nnet_config, 'addition_time_embed_dim', 256) or 256
-
-    #     # The conditioning_embedding_out_channels must also match the number of blocks.
-    #     # We'll truncate the default if the UNet has fewer blocks.
-    #     default_cond_out_channels = (16, 32, 96, 256)
-    #     conditioning_embedding_out_channels = default_cond_out_channels[:len(block_out_channels)+1]
-    #     self.logger.info(f"  LOGGER- Adjusted conditioning_embedding_out_channels: {conditioning_embedding_out_channels}")
-
-
-    #     controlnet = self.controlnet_class(
-    #         # --- Mirrored Architecture from UNet ---
-    #         addition_embed_type=addition_embed_type,
-    #         down_block_types=down_block_types,
-    #         block_out_channels=block_out_channels,
-    #         layers_per_block=layers_per_block,
-    #         transformer_layers_per_block=transformer_layers_per_block,
-    #         attention_head_dim=attention_head_dim,
-    #         num_attention_heads=num_attention_heads,
-    #         cross_attention_dim=cross_attention_dim,
-    #         projection_class_embeddings_input_dim=projection_class_embeddings_input_dim,
-
-    #         # --- Explicitly Corrected Parameter ---
-    #         use_linear_projection=use_linear_projection,
-
-    #         # --- Dynamic/Derived General Params ---
-    #         in_channels=nnet_config.in_channels,
-    #         conditioning_channels=3,
-    #         num_control_type=num_control_type,
-    #         addition_time_embed_dim=addition_time_embed_dim,
-
-    #         # --- Other general params copied for compatibility ---
-    #         flip_sin_to_cos=nnet_config.flip_sin_to_cos,
-    #         freq_shift=nnet_config.freq_shift,
-    #         downsample_padding=nnet_config.downsample_padding,
-    #         mid_block_scale_factor=nnet_config.mid_block_scale_factor,
-    #         act_fn=nnet_config.act_fn,
-    #         norm_num_groups=nnet_config.norm_num_groups,
-    #         norm_eps=nnet_config.norm_eps,
-    #         upcast_attention=nnet_config.upcast_attention,
-    #         resnet_time_scale_shift=nnet_config.resnet_time_scale_shift,
-
-    #         # --- Dynamically Sized Params ---
-    #         conditioning_embedding_out_channels=conditioning_embedding_out_channels,
-
-    #         # --- Params with defaults ---
-    #         global_pool_conditions=False,
-    #     )
-    #     return controlnet
 
     def build_controlnet(self):
         # Build a ControlNet that mirrors the UNet's architecture but with corrected parameters.
@@ -255,7 +164,28 @@ class SDXLControlNetUnionTrainer(SD15ControlNetTrainer,SDXLTrainer):
             conditioning_embedding_out_channels=conditioning_embedding_out_channels,
             global_pool_conditions=False,
         )
+
+        self.logger.info("  LOGGER- [Optimization] Copying weights from UNet to ControlNet...")
         
+        # 获取 UNet 的权重字典
+        unet_state_dict = self.nnet.state_dict()
+        
+        # 简单统计一下加载比例
+        missing_keys, unexpected_keys = controlnet.load_state_dict(unet_state_dict, strict=False)
+        
+        # 统计一下加载比例
+        actual_loaded_keys = set(unet_state_dict.keys()) - set(unexpected_keys)
+        total_controlnet_keys = len(controlnet.state_dict().keys())
+        total_unet_keys = len(unet_state_dict.keys())
+        load_ratio_01 = len(actual_loaded_keys) / total_controlnet_keys * 100.0
+
+        load_ratio_02 = len(actual_loaded_keys) / total_unet_keys * 100.0
+
+        self.logger.info(f"  LOGGER- ControlNet weight load ratio: {load_ratio_01:.2f}% of ControlNet keys, {load_ratio_02:.2f}% of UNet keys.")
+        
+        # if len(missing_keys) > 0:
+        #     self.logger.info(f"  LOGGER- Missing keys in ControlNet load: {missing_keys}")
+
         return controlnet
 
 
@@ -349,7 +279,7 @@ class SDXLControlNetUnionTrainer(SD15ControlNetTrainer,SDXLTrainer):
         if union_control_type.shape[0] != batch['images'].shape[0]:
             union_control_type = union_control_type.repeat(batch['images'].shape[0], 1)
 
-        # # 保存图片用于debug
+        # # # 保存图片用于debug
         # print("  LOGGER- [Debug] Saving original images from batch")
         # save_path = "debug/controlnet_union_original_images.png"
         # from torchvision.utils import save_image
@@ -359,8 +289,8 @@ class SDXLControlNetUnionTrainer(SD15ControlNetTrainer,SDXLTrainer):
         proc_list = []
         for idx, ci in enumerate(condition_images_list):
             if ci is None:
-                # Allow None for inactive control types
                 proc_list.append(None)
+                raise RuntimeError(f"ControlNet Union Trainer requires all condition images to be provided. Missing condition at index {idx}.")
                 continue
             if ci.shape[1] != 3:
                 raise ValueError(
@@ -368,13 +298,24 @@ class SDXLControlNetUnionTrainer(SD15ControlNetTrainer,SDXLTrainer):
                     f"Got {ci.shape[1]} channels. If you have pre-encoded features, change the dataset to return raw images."
                 )
             proc_list.append(ci.to(self.device, dtype=self.controlnet.dtype))
-            # # 保存图片用于debug
-            # print("  LOGGER- [Debug] Saving condition image for control type", idx)
-            # save_path = f"debug/controlnet_union_condition_type_{idx}.png"
-            # save_image(ci, save_path, nrow=4, normalize=True, value_range=(0, 1))
-            # self.logger.info(f"  LOGGER- [Debug] Saved condition image grid to {save_path} (Range: 0-1)")
-
+        #     # 保存图片用于debug
+        #     print("  LOGGER- [Debug] Saving condition image for control type", idx)
+        #     save_path = f"debug/controlnet_union_condition_type_{idx}.png"
+        #     save_image(ci, save_path, nrow=4, normalize=True, value_range=(0, 1))
+        #     self.logger.info(f"  LOGGER- [Debug] Saved condition image grid to {save_path} (Range: 0-1)")
+        #     # 打印控制类型
+        #     print(f"  LOGGER- [Debug] Control type {idx} active in batch: {union_control_type[:, idx].sum().item()} samples")
+        
         # raise RuntimeError("Stop here for debug")
+
+        if union_control_type.max() > 1.0 or union_control_type.min() < 0.0:
+            #  self.logger.warning(f"  [WARNING] union_control_type values out of range [0, 1]. Max: {union_control_type.max()}, Min: {union_control_type.min()}")
+            raise ValueError("union_control_type must be a multi-hot vector with values in [0, 1].")
+        first_sample_type = union_control_type[0]
+        for i in range(1, union_control_type.shape[0]):
+            if not torch.allclose(union_control_type[i], first_sample_type, atol=1e-4):
+                # 这里如果不报错，ControlNetUnion 内部取 indices = nonzero(control_type[0]) 就会导致静默错误
+                raise ValueError("ControlNet Union requires all samples in a batch to have identical active control types.")
         
         # ControlNet Union forward
         down_block_res_samples, mid_block_res_sample = self.controlnet(
